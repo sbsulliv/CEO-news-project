@@ -1,0 +1,113 @@
+import requests
+from textblob import TextBlob
+from collections import Counter
+import spacy
+import tkinter as tk
+from tkinter import Text, Scrollbar
+
+# Initialize spaCy
+nlp = spacy.load("en_core_web_sm")
+API_KEY = '83b637f89d7e4bddac643c0cd1d6d9c7'
+
+# Fetch and analyze articles
+def fetch_and_analyze():
+    results.insert(tk.END, "Fetching articles...\n")
+    query = "stock OR shares OR company"
+    articles = fetch_articles(query)
+    
+    if not articles:
+        results.insert(tk.END, "No articles fetched. Exiting analysis.\n")
+        return
+
+    results.insert(tk.END, "Analyzing articles...\n")
+    mentions, sentiments, industry_articles = analyze_articles(articles)
+
+    results.insert(tk.END, "Displaying results...\n")
+    display_results(mentions, sentiments, industry_articles)
+
+
+def fetch_articles(query, pagesize=100):
+    endpoint = 'https://newsapi.org/v2/everything'
+    params = {
+        'apiKey': API_KEY,
+        'q': query,
+        'pageSize': pagesize,
+        'language': 'en',
+        'sortBy': 'publishedAt',
+    }
+    response = requests.get(endpoint, params=params)
+    
+    # Check for non-200 response code
+    if response.status_code != 200:
+        results.insert(tk.END, f"Error fetching articles: {response.text}\n")
+        return []
+    
+    return response.json().get('articles', [])
+
+# ... other imports and initializations ...
+
+INDUSTRIES = {
+    "Tech": ["software", "AI", "computing", "tech", "digital"],
+    "Healthcare": ["healthcare", "pharmaceuticals", "medicine", "medical", "hospital"],
+    "Finance": ["finance", "banking", "stocks", "investment", "capital"],
+    # ... add more industries as needed
+}
+
+def categorize_article(content):
+    for industry, keywords in INDUSTRIES.items():
+        for keyword in keywords:
+            if keyword.lower() in content.lower():
+                return industry
+    return "Other"
+
+
+def analyze_articles(articles):
+    mentions = Counter()
+    sentiments = {}
+    industry_articles = {industry: [] for industry in INDUSTRIES.keys()}
+
+    for article in articles:
+        content = article['content']
+        blob = TextBlob(content)
+        sentiment = blob.sentiment.polarity
+        doc = nlp(content)
+
+        for ent in doc.ents:
+            if ent.label_ == "ORG":
+                mentions[ent.text] += 1
+                sentiments.setdefault(ent.text, []).append(sentiment)
+
+        for industry, keywords in INDUSTRIES.items():
+            if any(keyword in content.lower() for keyword in keywords):
+                industry_articles[industry].append(article)
+
+    return mentions, sentiments, industry_articles
+
+def display_results(mentions, sentiments, industry_articles):
+    results.delete(1.0, tk.END)  # Clear current content
+    for industry, articles in industry_articles.items():
+        results.insert(tk.END, f"Industry: {industry} ({len(articles)} articles)\n")
+        for article in articles:
+            results.insert(tk.END, f"Title: {article['title']}\n")
+        results.insert(tk.END, "\n")
+    for company, count in mentions.most_common():
+        avg_sentiment = sum(sentiments[company]) / len(sentiments[company])
+        line = f"Company: {company}, Mentions: {count}, Avg Sentiment: {avg_sentiment:.2f}\n"
+        results.insert(tk.END, line)
+
+
+# GUI using tkinter
+root = tk.Tk()
+root.title("Stock News Analysis")
+
+fetch_button = tk.Button(root, text="Fetch & Analyze News", command=fetch_and_analyze)
+fetch_button.pack(pady=20)
+
+results = Text(root, wrap=tk.WORD, height=40, width=140)
+results.pack(padx=20, pady=5)
+
+scrollbar = Scrollbar(root, command=results.yview)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+results['yscrollcommand'] = scrollbar.set
+
+root.mainloop()
