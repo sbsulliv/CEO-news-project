@@ -1,0 +1,136 @@
+import requests
+from textblob import TextBlob
+from collections import Counter
+import spacy
+import tkinter as tk
+from tkinter import ttk, Text, Scrollbar
+import matplotlib.pyplot as plt
+
+# Initialize spaCy
+nlp = spacy.load("en_core_web_sm")
+API_KEY = '83b637f89d7e4bddac643c0cd1d6d9c7'
+
+INDUSTRIES = {
+    "Tech": ["software", "AI", "computing", "tech", "digital"],
+    "Healthcare": ["healthcare", "pharmaceuticals", "medicine", "medical", "hospital"],
+    "Finance": ["finance", "banking", "stocks", "investment", "capital"],
+    # ... add more industries as needed
+}
+
+def fetch_articles(query, pagesize=100):
+    endpoint = 'https://newsapi.org/v2/everything'
+    params = {
+        'apiKey': API_KEY,
+        'q': query,
+        'pageSize': pagesize,
+        'language': 'en',
+        'sortBy': 'publishedAt',
+    }
+    response = requests.get(endpoint, params=params)
+    
+    # Check for non-200 response code
+    if response.status_code != 200:
+        results.insert(tk.END, f"Error fetching articles: {response.text}\n")
+        return []
+    
+    return response.json().get('articles', [])
+
+def analyze_articles(articles):
+    mentions = Counter()
+    sentiments = {}
+    industry_articles = {industry: [] for industry in INDUSTRIES.keys()}
+
+    for article in articles:
+        content = article['content']
+        blob = TextBlob(content)
+        sentiment = blob.sentiment.polarity
+        doc = nlp(content)
+
+        for ent in doc.ents:
+            if ent.label_ == "ORG":
+                mentions[ent.text] += 1
+                sentiments.setdefault(ent.text, []).append(sentiment)
+
+        for industry, keywords in INDUSTRIES.items():
+            if any(keyword in content.lower() for keyword in keywords):
+                article['sentiment'] = sentiment
+                industry_articles[industry].append(article)
+
+    return mentions, industry_articles
+
+def display_results(mentions, industry_articles):
+    results.delete(1.0, tk.END)  # Clear current content
+
+    for industry, articles in industry_articles.items():
+        if articles:
+            results.insert(tk.END, f"Industry: {industry} ({len(articles)} articles)\n")
+            for article in articles:
+                results.insert(tk.END, f"Title: {article['title']}\n")
+                results.insert(tk.END, f"Sentiment: {article['sentiment']:.2f}\n")
+            
+            # Plot the line chart for sentiment
+            avg_sentiments = [article['sentiment'] for article in articles]
+            article_titles = [article['title'] for article in articles]
+            
+            plt.figure(figsize=(10, 2))
+            plt.plot(article_titles, avg_sentiments, marker='o', linestyle='-')
+            plt.xticks(rotation=90)
+            plt.xlabel('Articles')
+            plt.ylabel('Sentiment')
+            plt.title(f'Sentiment Trends for {industry} Industry Articles')
+            plt.tight_layout()
+            plt.show()
+            
+            results.insert(tk.END, "\n")
+
+    # Display mentions
+    for company, count in mentions.most_common():
+        line = f"Company: {company}, Mentions: {count}\n"
+        results.insert(tk.END, line)
+
+def fetch_and_analyze():
+    results.delete(1.0, tk.END)  # Clear previous results
+    selected_industry = industry_var.get()
+    industry_keywords = INDUSTRIES.get(selected_industry, [])
+    query = " OR ".join(industry_keywords)
+    
+    if not query:
+        results.insert(tk.END, "Please select an industry.\n")
+        return
+    
+    articles = fetch_articles(query)
+    if not articles:
+        results.insert(tk.END, "No articles fetched. Exiting analysis.\n")
+        return
+
+    mentions, industry_articles = analyze_articles(articles)
+    display_results(mentions, industry_articles)
+
+# GUI using tkinter
+root = tk.Tk()
+root.title("Stock News Analysis by Industry")
+
+# Create a label and dropdown menu for selecting industry
+industry_label = tk.Label(root, text="Select Industry:")
+industry_label.pack(pady=10)
+
+industry_var = tk.StringVar()
+industry_combobox = ttk.Combobox(root, textvariable=industry_var, values=list(INDUSTRIES.keys()))
+industry_combobox.pack(pady=10)
+industry_combobox.set("Tech")  # default value
+
+fetch_button = tk.Button(root, text="Fetch & Analyze News", command=fetch_and_analyze)
+fetch_button.pack(pady=20)
+
+results = Text(root, wrap=tk.WORD, height=30, width=100)  # Increased dimensions of the Text widget
+results.pack(padx=20, pady=5)
+
+scrollbar = Scrollbar(root, command=results.yview)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+results['yscrollcommand'] = scrollbar.set
+
+root.mainloop()
+
+
+
+
